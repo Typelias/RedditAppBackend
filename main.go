@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 type Config struct {
@@ -23,6 +25,7 @@ type RedditPost struct {
 	Text      string `json:"selftext"`
 	Title     string `json:"title"`
 	Img       string `json:"url"`
+	FullName  string `json:"name"`
 }
 
 type RedditPostChild struct {
@@ -36,6 +39,11 @@ type FrontPageData struct {
 
 type FrontPageResponse struct {
 	Data FrontPageData `json:"data"`
+}
+
+type RedditListingResponse struct {
+	After    string       `json:"after"`
+	PostList []RedditPost `json:"PostList"`
 }
 
 func getConfig() Config {
@@ -82,13 +90,15 @@ func login(username string, password string) string {
 
 	// fmt.Println(respData["access_token"])
 
+	fmt.Println(respData["expires_in"])
+
 	ret := string(respData["access_token"])
 
 	return ret
 
 }
 
-func getFrontpage(token string) {
+func getFrontpage(token string) RedditListingResponse {
 	client := &http.Client{}
 
 	req, _ := http.NewRequest("GET", "https://oauth.reddit.com/.json?limit=5", nil)
@@ -108,20 +118,56 @@ func getFrontpage(token string) {
 
 	json.Unmarshal([]byte(bodyString), &data)
 
-	postList := data.Data.PostList
+	var ret RedditListingResponse
 
-	for _, post := range postList {
-		temp := post.Post
-		fmt.Println("------------------------------------------------------------------------")
-		fmt.Print(temp.Subreddit + "\n" + temp.Title + "\n" + temp.Text + "\n" + temp.Img + "\n")
+	ret.After = data.Data.After
+
+	for _, children := range data.Data.PostList {
+		ret.PostList = append(ret.PostList, children.Post)
 	}
+
+	return ret
 
 }
 
+type LoginData struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 func main() {
-	conf := getConfig()
 
-	token := login(conf.Username, conf.Password)
+	r := gin.Default()
 
-	getFrontpage(token)
+	r.POST("/login", func(c *gin.Context) {
+		var user LoginData
+
+		err := c.BindJSON(&user)
+
+		fmt.Println(user.Username)
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		token := login(user.Username, user.Password)
+
+		c.IndentedJSON(http.StatusOK, gin.H{
+			"Token": token,
+		})
+
+	})
+
+	r.GET("/frontpage", func(c *gin.Context) {
+		token := c.GetHeader("Authorization")
+		list := getFrontpage(token)
+
+		c.JSON(http.StatusOK, list)
+
+		// c.IndentedJSON(http.StatusOK, list)
+
+	})
+
+	r.Run()
+
 }
