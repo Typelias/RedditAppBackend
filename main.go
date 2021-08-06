@@ -152,7 +152,7 @@ func main() {
 
 		token := login(user.Username, user.Password)
 
-		c.IndentedJSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"Token": token,
 		})
 
@@ -163,8 +163,6 @@ func main() {
 		list := getFrontpage(token)
 
 		c.JSON(http.StatusOK, list)
-
-		// c.IndentedJSON(http.StatusOK, list)
 
 	})
 
