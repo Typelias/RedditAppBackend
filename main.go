@@ -10,40 +10,28 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 type Config struct {
 	Id     string `json:"agent_id"`
 	Secret string `json:"agent_secret"`
-	// Temporary just for testing big XD
-	Username string `json:"username"`
-	Password string `json:"password"`
+}
+
+type RedditListing struct {
+	After    string       `json:"after"`
+	PostList []RedditPost `json:"postList"`
 }
 
 type RedditPost struct {
-	Subreddit string `json:"subreddit"`
-	Text      string `json:"selftext"`
-	Title     string `json:"title"`
-	Img       string `json:"url"`
-	FullName  string `json:"name"`
-}
-
-type RedditPostChild struct {
-	Post RedditPost `json:"data"`
-}
-
-type FrontPageData struct {
-	After    string            `json:"after"`
-	PostList []RedditPostChild `json:"children"`
-}
-
-type FrontPageResponse struct {
-	Data FrontPageData `json:"data"`
-}
-
-type RedditListingResponse struct {
-	After    string       `json:"after"`
-	PostList []RedditPost `json:"PostList"`
+	Subreddit     string   `json:"subreddit"`
+	Text          string   `json:"selftext"`
+	Title         string   `json:"title"`
+	Img           string   `json:"url"`
+	FullName      string   `json:"name"`
+	AuthorName    string   `json:"authorName"`
+	GalleryImages []string `json:"gallery"`
+	PermaLink     string   `json:"permaLink"`
 }
 
 func getConfig() Config {
@@ -62,8 +50,6 @@ func login(username string, password string) string {
 	conf := getConfig()
 
 	client := &http.Client{}
-
-	// jsonStr := []byte(`{"grant_type": "password", "username": ` + username + `, "password":` + password + ` "lego123}`)
 
 	data := url.Values{}
 	data.Set("grant_type", "password")
@@ -88,8 +74,6 @@ func login(username string, password string) string {
 
 	json.Unmarshal([]byte(respBody), &respData)
 
-	// fmt.Println(respData["access_token"])
-
 	fmt.Println(respData["expires_in"])
 
 	ret := string(respData["access_token"])
@@ -98,10 +82,61 @@ func login(username string, password string) string {
 
 }
 
-func getFrontpage(token string) RedditListingResponse {
+func convertJsonToListing(jsonString string) RedditListing {
+	after := gjson.Get(jsonString, "data.after")
+
+	children := gjson.Get(jsonString, "data.children")
+
+	listing := RedditListing{
+		After: after.String(),
+	}
+
+	for _, child := range children.Array() {
+		subreddit := child.Get("data.subreddit")
+		text := child.Get("data.selftext")
+		title := child.Get("data.title")
+		url := child.Get("data.url")
+		fullname := child.Get("data.name")
+		authorName := child.Get("data.author")
+		permaLink := "http://reddit.com" + child.Get("data.permalink").String()
+
+		post := RedditPost{
+			Subreddit:  subreddit.String(),
+			Text:       text.String(),
+			Title:      title.String(),
+			Img:        url.String(),
+			FullName:   fullname.String(),
+			AuthorName: authorName.String(),
+			PermaLink:  permaLink,
+		}
+
+		mediaMetadata := child.Get("data.media_metadata")
+
+		if mediaMetadata.Exists() {
+			var gallery []string
+			mediaMetadata.ForEach(func(key, value gjson.Result) bool {
+
+				imgType := strings.Split(value.Get("m").String(), "/")[1]
+
+				url := "https://i.redd.it/" + key.String() + "." + imgType
+				//fmt.Println(url)
+				gallery = append(gallery, url)
+				return true
+			})
+			post.GalleryImages = gallery
+		}
+
+		listing.PostList = append(listing.PostList, post)
+	}
+
+	return listing
+
+}
+
+func getFrontpage(token string) RedditListing {
 	client := &http.Client{}
 
-	req, _ := http.NewRequest("GET", "https://oauth.reddit.com/.json?limit=5", nil)
+	req, _ := http.NewRequest("GET", "https://oauth.reddit.com/.json", nil)
 
 	req.Header.Add("Authorization", "bearer "+token)
 	req.Header.Add("User-Agent", "Satan")
@@ -110,23 +145,11 @@ func getFrontpage(token string) RedditListingResponse {
 
 	defer resp.Body.Close()
 
-	var data FrontPageResponse
-
 	body, _ := ioutil.ReadAll(resp.Body)
 
 	bodyString := string(body)
 
-	json.Unmarshal([]byte(bodyString), &data)
-
-	var ret RedditListingResponse
-
-	ret.After = data.Data.After
-
-	for _, children := range data.Data.PostList {
-		ret.PostList = append(ret.PostList, children.Post)
-	}
-
-	return ret
+	return convertJsonToListing(bodyString)
 
 }
 
