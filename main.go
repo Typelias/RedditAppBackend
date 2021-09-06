@@ -45,40 +45,56 @@ func getConfig() Config {
 	return conf
 }
 
-func login(username string, password string) string {
-
+func getToken(code string) (string, string) {
 	conf := getConfig()
 
 	client := &http.Client{}
 
 	data := url.Values{}
-	data.Set("grant_type", "password")
-	data.Set("username", username)
-	data.Set("password", password)
-
+	data.Set("grant_type", "authorization_code")
+	data.Set("code", code)
+	data.Set("redirect_uri", "https://github.com/Typelias/RedditAppFrontend")
 	req, _ := http.NewRequest("POST", "https://www.reddit.com/api/v1/access_token", strings.NewReader(data.Encode()))
 
-	req.SetBasicAuth(conf.Id, conf.Secret)
+	req.SetBasicAuth(conf.Id, "")
+
 	req.Header.Add("User-Agent", "Satan")
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, _ := client.Do(req)
+	resp, err := client.Do(req)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 
 	respBody := string(body)
 
+	fmt.Println("Body:")
+	fmt.Println(respBody)
+
 	var respData map[string]string
 
-	json.Unmarshal([]byte(respBody), &respData)
+	err = json.Unmarshal([]byte(respBody), &respData)
 
-	fmt.Println(respData["expires_in"])
+	if err != nil {
+		print(err.Error())
+	}
 
-	ret := string(respData["access_token"])
+	for key, val := range respData {
+		fmt.Println(key + "\t" + val)
+	}
 
-	return ret
+	fmt.Println(respData["access_token"], respData["refresh_token"])
+
+	return respData["access_token"], respData["refresh_token"]
 
 }
 
@@ -133,10 +149,56 @@ func convertJsonToListing(jsonString string) RedditListing {
 
 }
 
+func getRefreshToken(refreshToken string) string {
+	conf := getConfig()
+
+	client := &http.Client{}
+
+	data := url.Values{}
+	data.Set("grant_type", "refresh_token")
+	data.Set("refresh_token", refreshToken)
+	req, _ := http.NewRequest("POST", "https://www.reddit.com/api/v1/access_token", strings.NewReader(data.Encode()))
+
+	req.SetBasicAuth(conf.Id, "")
+
+	req.Header.Add("User-Agent", "Satan")
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	respBody := string(body)
+
+	fmt.Println("Body:")
+	fmt.Println(respBody)
+
+	var respData map[string]string
+
+	err = json.Unmarshal([]byte(respBody), &respData)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	return respData["access_token"]
+
+}
+
 func getFrontpage(token string) RedditListing {
 	client := &http.Client{}
 
-	req, _ := http.NewRequest("GET", "https://oauth.reddit.com/.json", nil)
+	req, _ := http.NewRequest("GET", "https://oauth.reddit.com/.json?limit=100", nil)
 
 	req.Header.Add("Authorization", "bearer "+token)
 	req.Header.Add("User-Agent", "Satan")
@@ -154,8 +216,11 @@ func getFrontpage(token string) RedditListing {
 }
 
 type LoginData struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Code string `json:"code"`
+}
+
+type RefreshResponse struct {
+	Token string `json:"token"`
 }
 
 func main() {
@@ -167,16 +232,17 @@ func main() {
 
 		err := c.BindJSON(&user)
 
-		fmt.Println(user.Username)
-
 		if err != nil {
 			fmt.Println(err)
 		}
 
-		token := login(user.Username, user.Password)
+		code := user.Code
+
+		token, refresh := getToken(code)
 
 		c.JSON(http.StatusOK, gin.H{
-			"Token": token,
+			"Token":   token,
+			"Refresh": refresh,
 		})
 
 	})
@@ -187,6 +253,17 @@ func main() {
 
 		c.JSON(http.StatusOK, list)
 
+	})
+
+	r.POST("/refresh", func(c *gin.Context) {
+		refresh := c.GetHeader("Authorization")
+		token := getRefreshToken(refresh)
+
+		ret := RefreshResponse{
+			Token: token,
+		}
+
+		c.JSON(http.StatusOK, ret)
 	})
 
 	r.Run()

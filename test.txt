@@ -1,0 +1,1 @@
+https://www.reddit.com/api/v1/authorize?client_id=kEVB3v54wz-xD9C94bWGnA&response_type=code&state=RANDOM_STRING&redirect_uri=https://github.com/Typelias/RedditAppFrontend&duration=permanent&scope=*
